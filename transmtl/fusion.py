@@ -50,7 +50,7 @@ class GraphEncoder(nn.Module):
         edge_type:  (E,)
         -> tra ve (N, d_model)
         """
-        h = self.proj(x)                      # 768 -> d_model
+        h = self.proj(torch.nan_to_num(x))    # 768 -> d_model (chống NaN từ embedding)
         if not HAS_PYG or edge_index.size(1) == 0:
             # Khong co canh hoac thieu PyG -> chi dung node feature
             return self.dropout(self.fallback(h) if not HAS_PYG else h)
@@ -86,6 +86,10 @@ class GatedFusion(nn.Module):
             query=H_tok, key=E_kg, value=E_kg,
             key_padding_mask=kg_padding_mask,
         )
+        # Chong NaN: neu mot sample bi mask toan bo (khong co entity) thi
+        # MultiheadAttention tra ve NaN. nan_to_num dua ve 0 -> sample do
+        # khong nhan tri thuc KG (tuong duong baseline), khong lam hong batch.
+        attn_out = torch.nan_to_num(attn_out)
         gate   = torch.sigmoid(self.gate(torch.cat([H_tok, attn_out], dim=-1)))
         fused  = H_tok + gate * attn_out
         return self.norm(fused)
@@ -123,5 +127,10 @@ def encode_kg_batch(graph_encoder, kg_batch, d_model, device):
             n = e.size(0)
             E_kg[i, :n] = e
             mask[i, :n] = False  # vi tri that
+        else:
+            # Bai khong co subgraph: giu 1 slot zero KHONG bi mask, tranh
+            # hang key_padding_mask toan True -> softmax tren toan -inf -> NaN.
+            # Attention vao vector 0 -> khong anh huong (ve baseline cho bai do).
+            mask[i, 0] = False
 
     return E_kg, mask
