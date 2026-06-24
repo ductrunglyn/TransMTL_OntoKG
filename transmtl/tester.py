@@ -85,7 +85,15 @@ def run_test(path_weight, data_path, len_in, len_out, num_workers, batch_size, d
              # ── OntoKG params (khớp với train_v2.train_model) ──
              use_ontokg=False, entity_emb_path=None, entity_idx_path=None,
              neo4j_uri=None, neo4j_pass=None, ontokg_backend="local",
-             tokenizer_csv=None):
+             tokenizer_csv=None,
+             # ── Kịch bản đánh giá OntoKG ──
+             #   test_mode = "static"  : truy vấn KG theo article_id (chỉ đúng khi
+             #                           bài test nằm trong KG, vd train/val transductive).
+             #             = "offline" : trích entity từ văn bản test -> link vào KG
+             #                           train+val (CHỈ ĐỌC), không cập nhật KG.
+             #             = "online"  : như offline + thêm entity/quan hệ MỚI từ
+             #                           văn bản test (cập nhật KG động).
+             test_mode="static", okg_data_dir=None, okg_device=None):
 
     # FIX 2: lấy tokenizer từ dataset object (ds ở vị trí cuối)
     if tokenizer_csv is not None:
@@ -145,6 +153,19 @@ def run_test(path_weight, data_path, len_in, len_out, num_workers, batch_size, d
         entity_idx_path=entity_idx_path,
     )
 
+    # OntoKG online/offline augmenter (trích + link entity từ chính văn bản test).
+    augmenter = None
+    if use_ontokg and test_mode in ("offline", "online"):
+        from OntoKG.module10_online_inference import OnlineKGAugmenter
+        _data_dir = okg_data_dir or str(__import__("pathlib").Path(entity_emb_path).resolve().parent.parent)
+        augmenter = OnlineKGAugmenter(
+            data_dir=_data_dir, entity_emb_path=entity_emb_path,
+            entity_idx_path=entity_idx_path, device=okg_device or device,
+        )
+        logger.info(f"OntoKG test_mode={test_mode}: dùng OnlineKGAugmenter (data_dir={_data_dir})")
+    elif use_ontokg:
+        logger.info(f"OntoKG test_mode={test_mode}: truy vấn KG tĩnh theo article_id.")
+
     scorer       = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=False)
     rouge1_list  = []; rouge2_list = []; rougel_list = []
     all_pred_kws = []; all_gold_kws = []
@@ -167,9 +188,14 @@ def run_test(path_weight, data_path, len_in, len_out, num_workers, batch_size, d
             src    = src.to(device); tgt_sum = tgt_sum.to(device); labels = labels.to(device)
             B_cur  = src.size(0)
 
-            # OntoKG: subgraph cho cả batch (None nếu tắt hoặc thiếu article_ids)
-            kg_batch = (bridge.build_kg_batch(article_ids)
-                        if (bridge is not None and article_ids is not None) else None)
+            # OntoKG: subgraph cho cả batch.
+            #   - offline/online: dựng từ chính văn bản test (raw_texts) qua augmenter.
+            #   - static: truy vấn KG tĩnh theo article_id.
+            if augmenter is not None and raw_texts is not None:
+                kg_batch = augmenter.build_kg_batch(list(raw_texts), mode=test_mode)
+            else:
+                kg_batch = (bridge.build_kg_batch(article_ids)
+                            if (bridge is not None and article_ids is not None) else None)
 
             # Đảm bảo target có SOS để tính loss chuẩn như lúc train
             tgt_sum_sos = ensure_decoder_sos(tgt_sum, model, device)
@@ -289,6 +315,8 @@ def run_test(path_weight, data_path, len_in, len_out, num_workers, batch_size, d
             total_key_loss += batch_key_loss * B_cur
 
     bridge.close()
+    if augmenter is not None:
+        augmenter.close()
     elapsed = time.time() - start
     logger.info(f"Evaluation finished in {elapsed:.1f}s on {n_samples} samples.")
 

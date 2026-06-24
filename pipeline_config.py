@@ -56,6 +56,15 @@ SEED       = 42
 # Đây là công tắc thường: chỉ cần đổi True/False. Không phụ thuộc biến môi trường.
 USE_ONTOKG = True
 
+# Kịch bản đánh giá OntoKG khi test (chỉ áp dụng khi USE_ONTOKG=True):
+#   "offline" = trích entity từ văn bản test -> link vào KG train+val (CHỈ ĐỌC),
+#               KG KHÔNG được cập nhật. (Kịch bản 1)
+#   "online"  = như offline + thêm entity/quan hệ MỚI từ văn bản test để bổ trợ
+#               TransMTL (KG cập nhật động). (Kịch bản 2)
+#   "static"  = truy vấn KG theo article_id (chỉ hợp lệ khi bài test nằm trong KG,
+#               vd đánh giá transductive trên train/val).
+TEST_MODE      = _env("TEST_MODE", "offline")
+
 NEO4J_URI      = _env("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER     = _env("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = _env("NEO4J_PASSWORD", "password")

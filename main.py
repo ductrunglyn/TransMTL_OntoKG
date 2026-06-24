@@ -182,6 +182,10 @@ def stage_test(args):
         **_ontokg_kwargs(args),
         # Pre-split: đánh giá trên TOÀN BỘ test.csv, vocab cố định trên trainval.
         tokenizer_csv=getattr(args.P, "TOKENIZER_CSV", getattr(args.P, "TRAINVAL_CSV", None)),
+        # Kịch bản đánh giá OntoKG: offline (KG chỉ đọc) | online (KG cập nhật động) | static.
+        test_mode=getattr(args, "test_mode", None) or getattr(args.P, "TEST_MODE", "offline"),
+        okg_data_dir=getattr(args.P, "DATA_DIR", None),
+        okg_device=getattr(args.P, "OKG_DEVICE", cfg.DEVICE),
     )
 
 
@@ -198,6 +202,11 @@ def main():
     ap.add_argument("--neo4j-pass", dest="neo4j_pass", default=P.NEO4J_PASSWORD)
     ap.add_argument("--skip-existing", dest="skip_existing", action="store_true",
                     help="Bỏ qua bước đã có output (resume).")
+    ap.add_argument("--test-mode", dest="test_mode", default=None,
+                    choices=["offline", "online", "static"],
+                    help="Kịch bản đánh giá OntoKG: offline (KG chỉ đọc) | "
+                         "online (KG cập nhật động từ văn bản test) | static (theo article_id). "
+                         "Mặc định lấy TEST_MODE trong pipeline_config.")
     # OntoKG: mặc định lấy từ pipeline_config.USE_ONTOKG, cho phép override.
     ap.add_argument("--use-ontokg", dest="use_ontokg", action="store_true", default=None)
     ap.add_argument("--no-ontokg", dest="use_ontokg", action="store_false")
