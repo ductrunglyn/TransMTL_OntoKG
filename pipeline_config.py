@@ -1,0 +1,141 @@
+# pipeline_config.py
+"""
+==========================================================================
+ CẤU HÌNH TRUNG TÂM cho toàn bộ pipeline TransMTL + OntoKG.
+==========================================================================
+Triết lý: CHỈ cần sửa file NÀY (đường dẫn dữ liệu, Neo4j, bật/tắt OntoKG)
+và conf.py (hyperparameter của model) là chạy được TOÀN BỘ pipeline bằng
+ĐÚNG MỘT LỆNH:
+
+    python main.py                 # chạy hết: split -> ontokg -> train -> test
+    python main.py --stage train   # chỉ chạy 1 giai đoạn
+    python main.py --skip-existing # bỏ qua bước đã có output (resume)
+
+Mọi giá trị ở đây đều có thể override bằng biến môi trường cùng tên,
+ví dụ:  RAW_DATA_CSV=/path/khac.csv python main.py
+==========================================================================
+"""
+import os
+
+import conf as _cfg
+
+
+def _env(key, default):
+    return os.environ.get(key, default)
+
+
+# ───────────────────────── 1. DỮ LIỆU GỐC (SỬA Ở ĐÂY) ─────────────────────
+# CSV gốc: cần các cột title, summary, content, publish_time, topic, cleaned_keywords
+RAW_DATA_CSV = _env(
+    "RAW_DATA_CSV",
+    "/home/coder/data/Data/tintuc_gen_final.csv",
+)
+# FastText .bin tiếng Việt (cc.vi.300.bin)
+PRETRAINED_VEC = _env(
+    "PRETRAINED_VEC",
+    "/home/coder/data/Data/cc.vi.300.bin",
+)
+
+# ───────────────────────── 2. THƯ MỤC LÀM VIỆC ────────────────────────────
+SPLIT_DIR = _env("SPLIT_DIR", "./data_split")   # train/val/test/trainval.csv
+DATA_DIR  = _env("OKG_DATA_DIR", "./data")      # toàn bộ artifact của OntoKG
+SAVE_DIR  = _env("SAVE_DIR", "./Results_Score")
+SAVE_PATH = _env("SAVE_PATH", os.path.join(SAVE_DIR, "BestModel.pt"))
+
+# Tỷ lệ chia dữ liệu (đồng bộ với get_loaders: val=0.2, test=0.2, seed=42)
+VAL_RATIO  = 0.2
+TEST_RATIO = 0.2
+SEED       = 42
+
+# ───────────────────────── 3. ONTOKG ──────────────────────────────────────
+# True  -> bật OntoKG: cần Neo4j đang chạy, sẽ chạy module1-8 để dựng KG.
+# False -> baseline TransMTL thuần (KHÔNG cần Neo4j). Mặc định baseline.
+# ════════════════ BẬT / TẮT ONTOKG — SỬA NGAY TẠI ĐÂY ════════════════
+#   False = baseline TransMTL thuần  (KHÔNG cần Neo4j, KHÔNG cần run_ontokg.py)
+#   True  = TransMTL + OntoKG         (cần Neo4j + đã chạy run_ontokg.py trước)
+# Đây là công tắc thường: chỉ cần đổi True/False. Không phụ thuộc biến môi trường.
+USE_ONTOKG = True
+
+NEO4J_URI      = _env("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER     = _env("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = _env("NEO4J_PASSWORD", "password")
+NEO4J_DATABASE = _env("NEO4J_DATABASE", "neo4j")
+ONTOKG_BACKEND = _env("ONTOKG_BACKEND", "local")
+
+# Thiết bị cho các module nặng (module3 linking, module7 KGE)
+OKG_DEVICE = _env("OKG_DEVICE", _cfg.DEVICE)
+
+
+# ───────────────────────── 4. ĐƯỜNG DẪN PHÁI SINH (không cần sửa) ──────────
+def _p(*parts):
+    return os.path.join(*parts)
+
+
+TRAIN_CSV    = _p(SPLIT_DIR, "train.csv")
+VAL_CSV      = _p(SPLIT_DIR, "val.csv")
+TEST_CSV     = _p(SPLIT_DIR, "test.csv")
+TRAINVAL_CSV = _p(SPLIT_DIR, "trainval.csv")
+
+# CSV dùng cho train và test.
+#   - train_v2.get_loaders nhận trainval.csv rồi TỰ chia train/val/test (seed=42).
+#   - testing_v2 cũng dùng get_loaders với CÙNG seed => phần "test" nội bộ chính là
+#     tập held-out mà model chưa từng train. Vì vậy mặc định test cũng trỏ vào
+#     trainval.csv (tái lập đúng quy trình đánh giá gốc, đã kiểm chứng).
+#   Muốn đánh giá trên file test.csv riêng (test_*) thì đổi TEST_DATA_CSV = TEST_CSV.
+TRAIN_DATA_CSV = TRAINVAL_CSV
+TEST_DATA_CSV  = TRAINVAL_CSV
+
+# OntoKG artifacts (chuỗi module 1 -> 8)
+M1_OUT          = _p(DATA_DIR, "preprocessed_articles.jsonl")
+M2_OUT          = _p(DATA_DIR, "module2_ner_concept.jsonl")
+M3_OUT          = _p(DATA_DIR, "module3_entity_linked.jsonl")
+M4_TRIPLES      = _p(DATA_DIR, "module4_triples.jsonl")
+KG_DIR          = _p(DATA_DIR, "kg")
+KGE_DIR         = _p(DATA_DIR, "kge")
+ONTOLOGY_DIR    = _p(DATA_DIR, "ontology")
+ENTITY_INDEX    = _p(KG_DIR, "entity_index.pkl")
+PYKEEN_TSV      = _p(KG_DIR, "pykeen_triples.tsv")
+ENTITY_EMB      = _p(KGE_DIR, "entity_embeddings.pt")
+ENTITY_IDX_JSON = _p(KGE_DIR, "entity_to_idx.json")
+
+# Thứ tự chạy các module OntoKG (đường dẫn tương đối so với repo root)
+ONTOKG_MODULES = [
+    "OntoKG/module1_preprocess.py",
+    "OntoKG/module2_ner_concept.py",
+    "OntoKG/module3_entity_linking.py",
+    "OntoKG/module4_relation_extraction.py",
+    "OntoKG/module5_kg_construction.py",
+    "OntoKG/module6_ontology_learning.py",
+    "OntoKG/module7_kge_training.py",
+]
+# Output đại diện để --skip-existing biết module đã chạy xong hay chưa.
+ONTOKG_MODULE_OUTPUTS = {
+    "OntoKG/module1_preprocess.py":         M1_OUT,
+    "OntoKG/module2_ner_concept.py":        M2_OUT,
+    "OntoKG/module3_entity_linking.py":     M3_OUT,
+    "OntoKG/module4_relation_extraction.py": M4_TRIPLES,
+    "OntoKG/module5_kg_construction.py":    PYKEEN_TSV,
+    "OntoKG/module6_ontology_learning.py":  _p(ONTOLOGY_DIR, "ontology_v1.1.json"),
+    "OntoKG/module7_kge_training.py":       ENTITY_EMB,
+}
+
+
+def ensure_dirs():
+    """Tạo sẵn mọi thư mục output cần thiết."""
+    for d in (SPLIT_DIR, DATA_DIR, KG_DIR, KGE_DIR, ONTOLOGY_DIR,
+              os.path.dirname(SAVE_PATH) or "."):
+        os.makedirs(d, exist_ok=True)
+
+
+def ontokg_env():
+    """Biến môi trường truyền cho các module subprocess (1-8) để chúng đọc
+    cùng một cấu hình đường dẫn / Neo4j thay vì path hardcode."""
+    env = os.environ.copy()
+    env["OKG_DATA_DIR"]   = DATA_DIR
+    env["OKG_INPUT_CSV"]  = TRAINVAL_CSV
+    env["OKG_DEVICE"]     = OKG_DEVICE
+    env["NEO4J_URI"]      = NEO4J_URI
+    env["NEO4J_USER"]     = NEO4J_USER
+    env["NEO4J_PASSWORD"] = NEO4J_PASSWORD
+    env["NEO4J_DATABASE"] = NEO4J_DATABASE
+    return env

@@ -1,0 +1,22 @@
+# ── Lõi TransMTL (baseline, không cần OntoKG) ──
+torch>=2.0
+numpy
+pandas
+tokenizers
+fasttext
+pytorch-crf
+rouge-score
+underthesea
+
+# ── Phần OntoKG (chỉ cần khi USE_ONTOKG = True) ──
+transformers
+torch-geometric
+pykeen
+umap-learn
+hdbscan
+scikit-learn
+rdflib
+networkx
+# neo4j
+requests
+# phonlp   # tuỳ chọn (NER/parsing tiếng Việt, khá nặng)
