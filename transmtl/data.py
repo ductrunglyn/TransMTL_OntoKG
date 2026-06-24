@@ -17,10 +17,15 @@ logger.setLevel(logging.INFO)
 # -------------------------
 class MultiTaskDataset(Dataset):
     def __init__(self, csv_file: str, tokenizer_dir: str = "vocab_subword", max_len_in: int = LEN_IN, max_len_out: int = LEN_OUT,
-                 add_special_tokens: bool = True, allow_overlapping: bool = False, vocab_size: int = 30000, min_frequency: int = 2):
+                 add_special_tokens: bool = True, allow_overlapping: bool = False, vocab_size: int = 30000, min_frequency: int = 2,
+                 ensure_tokenizer: bool = True):
         super().__init__()
-        # ensure tokenizer exists (train if needed)
-        ensure_tokenizer_for_csv(csv_file, vocab_size=vocab_size, min_frequency=min_frequency, tokenizer_dir=tokenizer_dir)
+        # ensure tokenizer exists (train if needed).
+        # ensure_tokenizer=False: giả định tokenizer/vocab ĐÃ được dựng sẵn (trên
+        # một corpus CỐ ĐỊNH, vd trainval.csv) -> KHÔNG dựng lại từ csv_file này,
+        # để vocab nhất quán giữa train/val/test (tránh lệch vocab gây hỏng checkpoint).
+        if ensure_tokenizer:
+            ensure_tokenizer_for_csv(csv_file, vocab_size=vocab_size, min_frequency=min_frequency, tokenizer_dir=tokenizer_dir)
         vocab_path = os.path.join(tokenizer_dir, "vocab.json")
         merges_path = os.path.join(tokenizer_dir, "merges.txt")
         if not (os.path.exists(vocab_path) and os.path.exists(merges_path)):
@@ -30,7 +35,18 @@ class MultiTaskDataset(Dataset):
         df = pd.read_csv(csv_file)
         text_col = "content"
         summary_col = "summary"
-        keywords_col = "keywords"
+        keywords_col = "cleaned_keywords"
+        # Bắt buộc cột 'cleaned_keywords' — KHÔNG fallback sang 'keywords'.
+        # Trước đây dùng row.get("keywords", "") nên khi CSV chỉ có
+        # 'cleaned_keywords' thì toàn bộ nhãn keyphrase = "O" (mất giám sát) mà
+        # không báo lỗi. Nay kiểm tra tường minh để tránh lỗi thầm lặng này.
+        if keywords_col not in df.columns:
+            raise ValueError(
+                f"CSV '{csv_file}' thiếu cột bắt buộc '{keywords_col}'. "
+                f"Các cột hiện có: {list(df.columns)}. "
+                f"Pipeline yêu cầu 'cleaned_keywords' cho tác vụ trích keyphrase "
+                f"(KHÔNG fallback sang 'keywords')."
+            )
 
         # NEW: article_id để truy vấn subgraph trong Neo4j (OntoKG).
         # split_dataset.py đã tạo sẵn cột này; nếu thiếu thì sinh theo chỉ số hàng.
@@ -52,7 +68,7 @@ class MultiTaskDataset(Dataset):
         for _, row in df.iterrows():
             txt = normalize_text(row.get(text_col, ""))
             sumry = normalize_text(row.get(summary_col, ""))
-            raw_kws = str(row.get(keywords_col, ""))
+            kw_items = parse_keywords_field(row.get(keywords_col, ""))
             enc_txt = tokenizer.encode(txt)
             t_tokens = enc_txt.tokens
             t_offsets = enc_txt.offsets  # list of (start, end)
@@ -100,15 +116,14 @@ class MultiTaskDataset(Dataset):
             summaries_tokens.append(s_tokens)
             # keywords tokenized to subword tokens (for convenience - not used for matching)
             kw_list = []
-            if raw_kws:
-                for kw in raw_kws.split(","):
-                    kw = kw.strip()
-                    if not kw:
-                        continue
-                    enc_kw = tokenizer.encode(normalize_text(kw))
-                    kw_tokens = enc_kw.tokens
-                    if kw_tokens:
-                        kw_list.append(kw_tokens)
+            for kw in kw_items:
+                kw = kw.strip()
+                if not kw:
+                    continue
+                enc_kw = tokenizer.encode(normalize_text(kw))
+                kw_tokens = enc_kw.tokens
+                if kw_tokens:
+                    kw_list.append(kw_tokens)
             keywords_tokenized.append(kw_list)
         # vocab map token->id
         try:
@@ -311,3 +326,60 @@ def get_loaders(data_path, len_in, len_out, num_workers, batch_size, val_ratio=0
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
                              num_workers=num_workers, pin_memory=pin_memory, collate_fn=collate_fn)
     return train_loader, val_loader, test_loader, vocab_size, pad_idx, word2idx, idx2word, emb_matrix, ds
+
+
+# ---------------------------------------------------------------------------
+# PRE-SPLIT loaders: KHÔNG re-split. Đọc thẳng các file đã chia sẵn
+# (train.csv / val.csv / test.csv) và dùng tokenizer/vocab CỐ ĐỊNH dựng MỘT LẦN
+# trên tokenizer_csv (vd trainval.csv). Bảo đảm "chia dữ liệu một lần duy nhất"
+# xuyên suốt OntoKG → train → val → test.
+# ---------------------------------------------------------------------------
+def get_loader_for_csv(csv_file, tokenizer_csv, len_in, len_out, num_workers, batch_size,
+                       vocab_size: int = 40000, min_frequency: int = 2, min_freq: int = None,
+                       shuffle: bool = False, tokenizer_dir: str = "vocab_subword"):
+    """Tạo MỘT DataLoader trên toàn bộ csv_file (không chia nhỏ).
+    Tokenizer/vocab được dựng (một lần, idempotent theo checksum) trên
+    tokenizer_csv — KHÔNG phụ thuộc nội dung csv_file — nên vocab cố định.
+    Trả về: loader, vocab_size, pad_idx, word2idx, idx2word, ds.
+    """
+    if min_freq is not None:
+        min_frequency = int(min_freq)
+    # Dựng tokenizer trên corpus CỐ ĐỊNH (trainval) — gọi nhiều lần là idempotent.
+    ensure_tokenizer_for_csv(tokenizer_csv, vocab_size=vocab_size,
+                             min_frequency=min_frequency, tokenizer_dir=tokenizer_dir)
+    ds = MultiTaskDataset(csv_file, tokenizer_dir=tokenizer_dir, max_len_in=len_in,
+                          max_len_out=len_out, add_special_tokens=True,
+                          allow_overlapping=False, vocab_size=vocab_size,
+                          min_frequency=min_frequency, ensure_tokenizer=False)
+    collate_fn = CollateCPU(pad_idx=ds.pad_idx, vocab_size=ds.vocab_size)
+    pin_memory = torch.cuda.is_available()
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
+                        num_workers=num_workers, pin_memory=pin_memory, collate_fn=collate_fn)
+    return loader, ds.vocab_size, ds.pad_idx, ds.word2idx, ds.idx2word, ds
+
+
+def get_loaders_presplit(train_csv, val_csv, test_csv, tokenizer_csv, len_in, len_out,
+                         num_workers, batch_size, vocab_size: int = 40000,
+                         min_frequency: int = 2, min_freq: int = None,
+                         tokenizer_dir: str = "vocab_subword"):
+    """Tạo 3 loader từ 3 file đã chia sẵn, KHÔNG re-split. Vocab cố định trên
+    tokenizer_csv (=trainval.csv). Trả về cùng định dạng get_loaders():
+      train_loader, val_loader, test_loader, vocab_size, pad_idx,
+      word2idx, idx2word, emb_matrix(None), ds(train).
+    """
+    train_loader, vsz, pad_idx, w2i, i2w, ds_train = get_loader_for_csv(
+        train_csv, tokenizer_csv, len_in, len_out, num_workers, batch_size,
+        vocab_size=vocab_size, min_frequency=min_frequency, min_freq=min_freq,
+        shuffle=True, tokenizer_dir=tokenizer_dir,
+    )
+    val_loader, *_ = get_loader_for_csv(
+        val_csv, tokenizer_csv, len_in, len_out, num_workers, batch_size,
+        vocab_size=vocab_size, min_frequency=min_frequency, min_freq=min_freq,
+        shuffle=False, tokenizer_dir=tokenizer_dir,
+    )
+    test_loader, *_ = get_loader_for_csv(
+        test_csv, tokenizer_csv, len_in, len_out, num_workers, batch_size,
+        vocab_size=vocab_size, min_frequency=min_frequency, min_freq=min_freq,
+        shuffle=False, tokenizer_dir=tokenizer_dir,
+    )
+    return train_loader, val_loader, test_loader, vsz, pad_idx, w2i, i2w, None, ds_train

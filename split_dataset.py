@@ -31,6 +31,15 @@ def split_dataset(
     n = len(df)
     print(f"Tong so bai: {n}")
 
+    # GAN article_id TOAN CUC ON DINH *truoc khi* chia, dua tren chi so hang goc.
+    # Nho vay CUNG mot bai bao giu CUNG article_id trong train/val/test/trainval
+    # va trong OntoKG (Neo4j/local). Day la dieu kien de:
+    #   - OntoKG xay tren trainval (=train+val) co id khop voi luc train tren
+    #     train.csv/val.csv,
+    #   - test.csv co id RIENG, KHONG nam trong KG (danh gia inductive sach).
+    if "article_id" not in df.columns:
+        df.insert(0, "article_id", [f"art_{i:06d}" for i in range(n)])
+
     # Shuffle voi cung seed (tuong duong torch random_split manual_seed)
     rng = np.random.RandomState(seed)
     perm = rng.permutation(n)
@@ -48,18 +57,15 @@ def split_dataset(
     df_test  = df.iloc[test_idx].reset_index(drop=True)
     df_trainval = pd.concat([df_train, df_val], ignore_index=True)
 
-    # Them article_id de Module 1-9 + Neo4j tra cuu duoc
+    # Ghi ra dia — article_id da co san (on dinh toan cuc), KHONG gan lai theo file.
     for name, d in [("train", df_train), ("val", df_val),
                     ("test", df_test), ("trainval", df_trainval)]:
-        d = d.copy()
-        d.insert(0, "article_id",
-                 [f"{name}_{i:06d}" for i in range(len(d))])
         path = os.path.join(out_dir, f"{name}.csv")
         d.to_csv(path, index=False)
         print(f"  {name:9s}: {len(d):6d} bai -> {path}")
 
-    print("\nLuu y: OntoKG (Module 1-7) xay tren trainval.csv")
-    print("       Test streaming (Module 10) dung test.csv")
+    print("\nLuu y: OntoKG (Module 1-7) xay tren trainval.csv (=train+val).")
+    print("       test.csv giu article_id rieng, KHONG nam trong KG -> danh gia inductive.")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 # train.py
+import ast
 import logging
 import os
 import numpy as np
@@ -49,6 +50,50 @@ def normalize_text(text: Optional[str]) -> str:
         return ""
     return unicodedata.normalize("NFC", s)
 
+def parse_keywords_field(value) -> List[str]:
+    """
+    Parse trường `cleaned_keywords` từ CSV gốc một cách thống nhất với
+    OntoKG/module1_preprocess.parse_list_like. Hỗ trợ:
+      - list/tuple/set Python
+      - chuỗi kiểu "['a', 'b']"  (ast.literal_eval)
+      - chuỗi ngăn cách bằng dấu , ; |
+    Trả về list[str] đã strip, bỏ rỗng.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text or text.lower() == "nan":
+            return []
+        parsed = None
+        try:
+            parsed = ast.literal_eval(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, (list, tuple, set)):
+            items = list(parsed)
+        elif parsed is not None and not isinstance(parsed, (dict, bytes)):
+            items = [parsed]
+        else:
+            items = re.split(r"\s*[,;|]\s*", text)
+    else:
+        # scalar (vd float nan từ pandas) -> bỏ qua nếu là nan
+        try:
+            if value != value:  # NaN check
+                return []
+        except Exception:
+            pass
+        items = [value]
+    out = []
+    for it in items:
+        s = str(it).strip()
+        if s:
+            out.append(s)
+    return out
+
+
 def compute_file_sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -56,8 +101,14 @@ def compute_file_sha256(path: str) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-def build_corpus_from_csv(csv_file, out_corpus_path, text_col="content", summary_col="summary", keywords_col="keywords"):
+def build_corpus_from_csv(csv_file, out_corpus_path, text_col="content", summary_col="summary", keywords_col="cleaned_keywords"):
     df = pd.read_csv(csv_file)
+    if keywords_col not in df.columns:
+        raise ValueError(
+            f"CSV '{csv_file}' thiếu cột bắt buộc '{keywords_col}'. "
+            f"Các cột hiện có: {list(df.columns)}. "
+            f"Pipeline yêu cầu cột 'cleaned_keywords' (KHÔNG fallback sang 'keywords')."
+        )
     os.makedirs(os.path.dirname(out_corpus_path) or ".", exist_ok=True)
     with open(out_corpus_path, "w", encoding="utf-8") as fout:
         for _, row in df.iterrows():
@@ -67,13 +118,10 @@ def build_corpus_from_csv(csv_file, out_corpus_path, text_col="content", summary
             s = normalize_text(row.get(summary_col, ""))
             if s:
                 fout.write(s + "\n")
-            kws = str(row.get(keywords_col, ""))
-            if kws:
-                for kw in kws.split(","):
-                    kw = kw.strip()
-                    if kw:
-                        kwn = normalize_text(kw)
-                        fout.write(kwn + "\n")
+            for kw in parse_keywords_field(row.get(keywords_col, "")):
+                kwn = normalize_text(kw)
+                if kwn:
+                    fout.write(kwn + "\n")
     logger.info(f"✅ Built corpus at {out_corpus_path}")
 
 def train_bpe_tokenizer(corpus_path, out_dir, vocab_size, min_frequency):

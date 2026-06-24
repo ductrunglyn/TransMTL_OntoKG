@@ -76,14 +76,17 @@ VAL_CSV      = _p(SPLIT_DIR, "val.csv")
 TEST_CSV     = _p(SPLIT_DIR, "test.csv")
 TRAINVAL_CSV = _p(SPLIT_DIR, "trainval.csv")
 
-# CSV dùng cho train và test.
-#   - train_v2.get_loaders nhận trainval.csv rồi TỰ chia train/val/test (seed=42).
-#   - testing_v2 cũng dùng get_loaders với CÙNG seed => phần "test" nội bộ chính là
-#     tập held-out mà model chưa từng train. Vì vậy mặc định test cũng trỏ vào
-#     trainval.csv (tái lập đúng quy trình đánh giá gốc, đã kiểm chứng).
-#   Muốn đánh giá trên file test.csv riêng (test_*) thì đổi TEST_DATA_CSV = TEST_CSV.
-TRAIN_DATA_CSV = TRAINVAL_CSV
-TEST_DATA_CSV  = TRAINVAL_CSV
+# CSV dùng cho train / val / test — CHIA MỘT LẦN DUY NHẤT (split_dataset.py).
+#   - TRAIN/VAL: train.csv & val.csv (TransMTL train trên train, early-stopping trên val).
+#   - TEST: test.csv (held-out THẬT, đánh giá trên TOÀN BỘ, KHÔNG re-split).
+#   - TOKENIZER_CSV: corpus CỐ ĐỊNH để dựng BPE/vocab (trainval) -> vocab nhất quán
+#     giữa train/val/test, tránh lệch vocab gây hỏng checkpoint.
+#   OntoKG xây trên trainval (=train+val); test.csv có article_id riêng, KHÔNG nằm
+#   trong KG -> đánh giá inductive sạch (không rò rỉ phía tri thức).
+TRAIN_DATA_CSV = TRAIN_CSV
+VAL_DATA_CSV   = VAL_CSV
+TEST_DATA_CSV  = TEST_CSV
+TOKENIZER_CSV  = TRAINVAL_CSV
 
 # OntoKG artifacts (chuỗi module 1 -> 8)
 M1_OUT          = _p(DATA_DIR, "preprocessed_articles.jsonl")

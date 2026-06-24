@@ -26,7 +26,11 @@ SIZE_VOCAB = 40000 # có thể điều chỉnh tùy theo dữ liệu và tài ng
 USE_SYNONYM = False # False là không sử dụng
 
 # MMoE related defaults (if you use MMoE)
-USE_MMOE = None # None là tắt, True là mở
+# True  = bật MMoE (MẶC ĐỊNH cho TransMTL — kiến trúc đề xuất bắt buộc dùng MMoE).
+# False = tắt MMoE (chỉ dùng cho ablation study).
+# Lưu ý: train_model() sẽ coi None là True (an toàn) để không bao giờ âm thầm
+# tắt MMoE trong lúc training; muốn ablation phải đặt tường minh USE_MMOE = False.
+USE_MMOE = True
 MMOE_NUM_EXPERTS = 4
 MMOE_EXPERT_HIDDEN = 1024 # có thể là None
 MMOE_GATE_HIDDEN = None

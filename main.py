@@ -138,6 +138,13 @@ def stage_train(args):
     print("\n" + "=" * 64 + f"\n[C] TRAIN TransMTL {tag}\n" + "=" * 64)
     from transmtl.train import train_model
 
+    # Pre-split: chia dữ liệu MỘT LẦN -> train.csv/val.csv riêng, vocab cố định
+    # trên trainval.csv. KHÔNG re-split trong get_loaders.
+    presplit_kwargs = dict(
+        train_csv=getattr(args.P, "TRAIN_CSV", None),
+        val_csv=getattr(args.P, "VAL_DATA_CSV", getattr(args.P, "VAL_CSV", None)),
+        tokenizer_csv=getattr(args.P, "TOKENIZER_CSV", getattr(args.P, "TRAINVAL_CSV", None)),
+    )
     train_model(
         args.P.TRAIN_DATA_CSV, args.save_path, cfg.PAD_IDX, cfg.LABEL_SMOOTHING,
         args.pretrained_vec, cfg.NUM_LAYER, cfg.D_MODEL, cfg.NUM_HEADS, cfg.DFF,
@@ -149,6 +156,7 @@ def stage_train(args):
         cfg.IGNORE_INDEX, cfg.NUM_WORKERS, cfg.BATCH_SIZE, cfg.USE_MMOE,
         cfg.DEVICE, cfg.SIZE_VOCAB,
         **_ontokg_kwargs(args),
+        **presplit_kwargs,
     )
 
 
@@ -172,6 +180,8 @@ def stage_test(args):
         cfg.MMOE_RESIDUAL_SCALE, cfg.IGNORE_INDEX, cfg.DEVICE, cfg.USE_MMOE,
         cfg.SIZE_VOCAB,
         **_ontokg_kwargs(args),
+        # Pre-split: đánh giá trên TOÀN BỘ test.csv, vocab cố định trên trainval.
+        tokenizer_csv=getattr(args.P, "TOKENIZER_CSV", getattr(args.P, "TRAINVAL_CSV", None)),
     )
 
 

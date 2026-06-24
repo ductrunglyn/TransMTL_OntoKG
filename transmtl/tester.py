@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from rouge_score import rouge_scorer
 
-from .data import get_loaders, subword_labels_to_word_labels
+from .data import get_loaders, get_loader_for_csv, subword_labels_to_word_labels
 # FIX: đổi TransMTL_v2 → TransMTL
 from .model import TransformerMTL
 from .preprocessing import load_fasttext_bin_embeddings, seed_everything, ids_to_text, convert_tags_to_keyphrases
@@ -84,13 +84,26 @@ def run_test(path_weight, data_path, len_in, len_out, num_workers, batch_size, d
              mmoe_residual_scale, ignore_index, device, use_mmoe, size_vocab,
              # ── OntoKG params (khớp với train_v2.train_model) ──
              use_ontokg=False, entity_emb_path=None, entity_idx_path=None,
-             neo4j_uri=None, neo4j_pass=None, ontokg_backend="local"):
+             neo4j_uri=None, neo4j_pass=None, ontokg_backend="local",
+             tokenizer_csv=None):
 
     # FIX 2: lấy tokenizer từ dataset object (ds ở vị trí cuối)
-    _, _, test_loader, vocab, pad_idx, word2idx, idx2word, _, ds = get_loaders(
-        data_path, len_in, len_out, num_workers, batch_size,
-        val_ratio=0.2, test_ratio=0.2, seed=42, min_freq=3, vocab_size=size_vocab
-    )
+    if tokenizer_csv is not None:
+        # CHẾ ĐỘ PRE-SPLIT: đánh giá trên TOÀN BỘ data_path (=test.csv), KHÔNG
+        # re-split; vocab cố định trên tokenizer_csv (=trainval.csv) để khớp
+        # checkpoint đã train.
+        print(f"[data] Pre-split test: eval trên toàn bộ {data_path} | "
+              f"tokenizer corpus={tokenizer_csv}")
+        test_loader, vocab, pad_idx, word2idx, idx2word, ds = get_loader_for_csv(
+            data_path, tokenizer_csv, len_in, len_out, num_workers, batch_size,
+            vocab_size=size_vocab, min_freq=3, shuffle=False,
+        )
+    else:
+        # CHẾ ĐỘ CŨ (tương thích ngược): re-split data_path 60/20/20, lấy test nội bộ.
+        _, _, test_loader, vocab, pad_idx, word2idx, idx2word, _, ds = get_loaders(
+            data_path, len_in, len_out, num_workers, batch_size,
+            val_ratio=0.2, test_ratio=0.2, seed=42, min_freq=3, vocab_size=size_vocab
+        )
     tokenizer = getattr(ds, "tokenizer", None)
     if tokenizer is None:
         logger.warning("Tokenizer not found in dataset — ROUGE sẽ dùng fallback ids_to_text.")
