@@ -28,12 +28,12 @@ def _env(key, default):
 # CSV gốc: cần các cột title, summary, content, publish_time, topic, cleaned_keywords
 RAW_DATA_CSV = _env(
     "RAW_DATA_CSV",
-    "/home/coder/data/Data/tintuc_gen_final.csv",
+    "/home/hoangtrung/hdtrungoi/CoKhanh/Data/tintuc_gen_final.csv",
 )
 # FastText .bin tiếng Việt (cc.vi.300.bin)
 PRETRAINED_VEC = _env(
     "PRETRAINED_VEC",
-    "/home/coder/data/Data/cc.vi.300.bin",
+    "/home/hoangtrung/hdtrungoi/CoKhanh/TransMTL_K-Fold/word_embedding_pretrain/cc.vi.300.bin",
 )
 
 # ───────────────────────── 2. THƯ MỤC LÀM VIỆC ────────────────────────────
