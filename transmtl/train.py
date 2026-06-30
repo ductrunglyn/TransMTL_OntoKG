@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from rouge_score import rouge_scorer
-from .data import get_loaders, get_loaders_presplit
+from .data import get_loaders
 from .model import TransformerMTL
 from .preprocessing import load_fasttext_bin_embeddings, seed_everything, convert_tags_to_keyphrases
 from .evaluation import evaluate_keyphrase_lists
@@ -303,17 +303,7 @@ def train_model(
     # ── OntoKG params (đã bỏ use_synonym, synonym_path) ──
     use_ontokg=False, entity_emb_path=None, entity_idx_path=None,
     neo4j_uri=None, neo4j_pass=None, ontokg_backend="local",
-    # ── Pre-split (chia dữ liệu MỘT LẦN): nếu truyền train_csv thì dùng
-    #    train.csv/val.csv riêng + vocab cố định trên tokenizer_csv, KHÔNG re-split.
-    train_csv=None, val_csv=None, tokenizer_csv=None,
 ):
-    # MMoE là thành phần bắt buộc của TransMTL khi training. Nếu caller truyền
-    # use_mmoe=None (giá trị "chưa đặt"), coi như BẬT để tránh âm thầm suy biến
-    # về encoder-decoder thường. Muốn ablation thì phải truyền use_mmoe=False.
-    if use_mmoe is None:
-        logger.warning("use_mmoe=None → ép BẬT MMoE cho training (mặc định bắt buộc).")
-        use_mmoe = True
-
     summary_lr_mult     = 2.0
     crf_lr_mult         = 1.0
     weight_lr_mult      = 5.0
@@ -323,21 +313,19 @@ def train_model(
     patience            = 5
     seed_everything(42)
     print(f"Using device: {device}")
-    if train_csv is not None and val_csv is not None:
-        # CHẾ ĐỘ PRE-SPLIT: train.csv / val.csv riêng, vocab cố định trên tokenizer_csv
-        # (=trainval.csv). KHÔNG re-split -> "chia dữ liệu một lần duy nhất".
-        print(f"[data] Pre-split: train={train_csv} | val={val_csv} | "
-              f"tokenizer corpus={tokenizer_csv or train_csv}")
-        train_loader, val_loader, _, vocab, pad_idx, word2idx, idx2word, _, ds = get_loaders_presplit(
-            train_csv, val_csv, val_csv, tokenizer_csv or data_path,
-            len_in, len_out, num_workers, batch_size, vocab_size=size_vocab, min_freq=3,
-        )
-    else:
-        # CHẾ ĐỘ CŨ (tương thích ngược): tự re-split CSV truyền vào 60/20/20.
-        train_loader, val_loader, _, vocab, pad_idx, word2idx, idx2word, _, ds = get_loaders(
-            data_path, len_in, len_out, num_workers, batch_size,
-            val_ratio=0.2, test_ratio=0.2, seed=42, min_freq=3, vocab_size=size_vocab,
-        )
+    print("="*60)
+    print("[CONFIG BANNER] So sanh cong bang chi khi MOI thong so duoi day")
+    print("                GIONG NHAU giua 2 lan chay, chi khac use_ontokg:")
+    print(f"  use_ontokg={use_ontokg} | ontokg_backend={ontokg_backend} | use_mmoe={use_mmoe}")
+    print(f"  use_copy=True | batch_size={batch_size} | d_model={d_model} | "
+          f"num_layers={num_layers} | num_heads={num_heads} | dff={dff}")
+    print(f"  num_epochs={num_epochs} | lr={lr} | weight_decay={weight_decay} | "
+          f"dropout={dropout} | size_vocab={size_vocab}")
+    print("="*60)
+    train_loader, val_loader, _, vocab, pad_idx, word2idx, idx2word, _, ds = get_loaders(
+        data_path, len_in, len_out, num_workers, batch_size,
+        val_ratio=0.2, test_ratio=0.2, seed=42, min_freq=3, vocab_size=size_vocab,
+    )
     tokenizer = getattr(ds, "tokenizer", None)
     if tokenizer is None:
         logger.warning("Dataset không có .tokenizer — ROUGE sẽ dùng fallback ids_to_text.")

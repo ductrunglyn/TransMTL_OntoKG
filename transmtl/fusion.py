@@ -73,6 +73,11 @@ class GatedFusion(nn.Module):
             d_model, num_heads, dropout=dropout, batch_first=True
         )
         self.gate  = nn.Linear(d_model * 2, 1)
+        # Khoi tao cong "dong": bat dau ~baseline (gate≈sigmoid(-3)≈0.05),
+        # model tu hoc MO cong chi o noi KG thuc su giup -> tranh bom nhieu
+        # KG (TransE yeu) lam tut ROUGE luc dau.
+        nn.init.zeros_(self.gate.weight)
+        nn.init.constant_(self.gate.bias, -3.0)
         self.norm  = nn.LayerNorm(d_model)
 
     def forward(self, H_tok, E_kg, kg_padding_mask=None):
